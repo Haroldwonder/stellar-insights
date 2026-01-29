@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
 import {
   TrendingUp,
   Search,
@@ -11,21 +11,24 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  Check,
+  BarChart3,
+  Plus,
   X,
-  Save,
-  RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
 import {
   getCorridors,
   CorridorMetrics,
 } from "@/lib/api";
-import { mockCorridors } from "@/components/lib//mockCorridorData";
+import { mockCorridors } from "@/components/lib/mockCorridorData";
 import { MainLayout } from "@/components/layout";
 import { SkeletonCorridorCard } from "@/components/ui/Skeleton";
 import { CorridorHeatmap } from "@/components/charts/CorridorHeatmap";
+import { usePagination } from "@/hooks/usePagination";
+import { DataTablePagination } from "@/components/ui/DataTablePagination";
 
-export default function CorridorsPage() {
+function CorridorsPageContent() {
   const [corridors, setCorridors] = useState<CorridorMetrics[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "heatmap">("grid");
   const [loading, setLoading] = useState(true);
@@ -33,14 +36,15 @@ export default function CorridorsPage() {
   const [sortBy, setSortBy] = useState<
     "success_rate" | "health_score" | "liquidity"
   >("health_score");
-  
+  const [selectedCorridors, setSelectedCorridors] = useState<string[]>([]);
+
   // Filter state variables
   const [successRateRange, setSuccessRateRange] = useState<[number, number]>([0, 100]);
   const [volumeRange, setVolumeRange] = useState<[number, number]>([0, 10000000]);
   const [assetCodeFilter, setAssetCodeFilter] = useState("");
   const [timePeriod, setTimePeriod] = useState("7d");
   const [showFilters, setShowFilters] = useState(false);
-  
+
   // Filter presets state
   const [filterPresets, setFilterPresets] = useState<Array<{
     name: string;
@@ -105,7 +109,7 @@ export default function CorridorsPage() {
           console.log("API not available, using mock data");
           setCorridors(mockCorridors);
         }
-   } catch (err) {
+      } catch (err) {
         console.error("Error fetching corridors:", err);
       } finally {
         setLoading(false);
@@ -116,15 +120,6 @@ export default function CorridorsPage() {
   }, [successRateRange, volumeRange, assetCodeFilter, timePeriod, sortBy]);
 
   const paginatedCorridors = filteredCorridors.slice(startIndex, endIndex);
-
-  const paginatedCorridors = filteredCorridors.slice(startIndex, endIndex);
-
-  const {
-    currentPage: finalCurrentPage,
-    pageSize: finalPageSize,
-    onPageChange: finalOnPageChange,
-    onPageSizeChange: finalOnPageSizeChange,
-  } = usePagination(filteredCorridors.length);
 
   const getHealthColor = (score: number) => {
     if (score >= 90)
@@ -150,56 +145,19 @@ export default function CorridorsPage() {
     return <AlertCircle className="w-5 h-5 text-red-500" />;
   };
 
-  // Filter functions
-  const clearAllFilters = () => {
-    setSuccessRateRange([0, 100]);
-    setVolumeRange([0, 10000000]);
-    setAssetCodeFilter("");
-    setTimePeriod("");
-    setSearchTerm("");
+  const toggleCorridor = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedCorridors((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      if (prev.length >= 3) {
+        return [...prev.slice(1), id];
+      }
+      return [...prev, id];
+    });
   };
-
-  const saveFilterPreset = () => {
-    if (!presetName.trim()) return;
-    const preset = {
-      name: presetName,
-      filters: {
-        successRateRange,
-        volumeRange,
-        assetCodeFilter,
-        timePeriod,
-        searchTerm,
-        sortBy,
-      },
-    };
-    const updatedPresets = [...filterPresets, preset];
-    setFilterPresets(updatedPresets);
-    localStorage.setItem('corridorFilterPresets', JSON.stringify(updatedPresets));
-    setPresetName("");
-  };
-
-  const loadFilterPreset = (preset: typeof filterPresets[0]) => {
-    setSuccessRateRange(preset.filters.successRateRange);
-    setVolumeRange(preset.filters.volumeRange);
-    setAssetCodeFilter(preset.filters.assetCodeFilter);
-    setTimePeriod(preset.filters.timePeriod);
-    setSearchTerm(preset.filters.searchTerm);
-    setSortBy(preset.filters.sortBy);
-  };
-
-  const deleteFilterPreset = (index: number) => {
-    const updatedPresets = filterPresets.filter((_preset, i) => i !== index);
-    setFilterPresets(updatedPresets);
-    localStorage.setItem('corridorFilterPresets', JSON.stringify(updatedPresets));
-  };
-
-  // Load presets on mount
-  useEffect(() => {
-    const saved = localStorage.getItem('corridorFilterPresets');
-    if (saved) {
-      setFilterPresets(JSON.parse(saved));
-    }
-  }, []);
 
   return (
     <MainLayout>
@@ -238,47 +196,36 @@ export default function CorridorsPage() {
               <option value="success_rate">Sort by Success Rate</option>
               <option value="liquidity">Sort by Liquidity</option>
             </select>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {showFilters ? 'Hide Filters' : 'Show Filters'}
-            </button>
           </div>
         </div>
 
-        {/* View Mode Toggle - NEW */}
-  <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-1">
-    <button
-      onClick={() => setViewMode("grid")}
-      className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors ${
-        viewMode === "grid"
-          ? "bg-blue-500 text-white"
-          : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
-      }`}
-    >
-      <List className="w-4 h-4" />
-      <span className="text-sm font-medium">Grid</span>
-    </button>
-    <button
-      onClick={() => setViewMode("heatmap")}
-      className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors ${
-        viewMode === "heatmap"
-          ? "bg-blue-500 text-white"
-          : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
-      }`}
-    >
-      <Grid3x3 className="w-4 h-4" />
-      <span className="text-sm font-medium">Heatmap</span>
-    </button>
-  </div>
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-1 mb-6">
+          <button
+            onClick={() => setViewMode("grid")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors ${viewMode === "grid"
+              ? "bg-blue-500 text-white"
+              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
+              }`}
+          >
+            <List className="w-4 h-4" />
+            <span className="text-sm font-medium">Grid</span>
+          </button>
+          <button
+            onClick={() => setViewMode("heatmap")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-colors ${viewMode === "heatmap"
+              ? "bg-blue-500 text-white"
+              : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700"
+              }`}
+          >
+            <Grid3x3 className="w-4 h-4" />
+            <span className="text-sm font-medium">Heatmap</span>
+          </button>
+        </div>
 
         {/* Content */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <SkeletonCorridorCard />
-            <SkeletonCorridorCard />
-            <SkeletonCorridorCard />
             <SkeletonCorridorCard />
             <SkeletonCorridorCard />
             <SkeletonCorridorCard />
@@ -291,36 +238,48 @@ export default function CorridorsPage() {
             </p>
           </div>
         ) : viewMode === "heatmap" ? (
-          /* Heatmap View */
           <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-6">
-            <div className="mb-4">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                Corridor Health Matrix
-              </h2>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Hover over cells to view detailed metrics. Colors represent health scores.
-              </p>
-            </div>
             <CorridorHeatmap corridors={filteredCorridors} />
           </div>
         ) : (
-          // Grid view
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredCorridors.map((corridor) => (
-              <Link
-                key={corridor.id}
-                href={`/corridors/${corridor.id}`}
-                className="group bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg p-6 hover:border-blue-500 hover:shadow-lg transition-all duration-200 transform hover:-translate-y-1 text-left cursor-pointer"
-              >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1 min-w-0">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white group-hover:text-blue-500 transition-colors truncate">
-                      {corridor.source_asset} → {corridor.destination_asset}
-                    </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
-                      {corridor.id}
-                    </p>
+              <div key={corridor.id} className="relative group">
+
+                <div className="absolute top-4 right-4 z-10">
+                  <button
+                    onClick={(e) => toggleCorridor(corridor.id, e)}
+                    className={`w-6 h-6 rounded-md border flex items-center justify-center transition-all ${selectedCorridors.includes(corridor.id)
+                      ? 'bg-blue-600 border-blue-600 text-white shadow-md'
+                      : 'bg-white/80 dark:bg-slate-700/80 border-gray-300 dark:border-slate-600 hover:border-blue-400'
+                      }`}
+                    title={selectedCorridors.includes(corridor.id) ? "Deselect for comparison" : "Select for comparison"}
+                  >
+                    {selectedCorridors.includes(corridor.id) ? (
+                      <Check className="w-4 h-4 stroke-[3]" />
+                    ) : (
+                      <Plus className="w-4 h-4 text-gray-400" />
+                    )}
+                  </button>
+                </div>
+                <Link
+                  href={`/corridors/${corridor.id}`}
+                  className={`block bg-white dark:bg-slate-800 border rounded-xl p-6 hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 text-left cursor-pointer h-full ${selectedCorridors.includes(corridor.id)
+                    ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-blue-500/10'
+                    : 'border-gray-200 dark:border-slate-700'
+                    }`}
+                >
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1 min-w-0">
+                      <h2 className="text-xl font-bold text-gray-900 dark:text-white group-hover:text-blue-500 transition-colors truncate">
+                        {corridor.source_asset} → {corridor.destination_asset}
+                      </h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
+                        {corridor.id}
+                      </p>
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 transform translate-x-2 group-hover:translate-x-0 duration-200 shrink-0 ml-2" />
                   </div>
 
                   {/* Success Rate and Health Score */}
@@ -407,16 +366,49 @@ export default function CorridorsPage() {
                     </div>
                   </div>
                 </Link>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-            <DataTablePagination
-              totalItems={filteredCorridors.length}
-              pageSize={pageSize}
-              currentPage={currentPage}
-              onPageChange={onPageChange}
-              onPageSizeChange={onPageSizeChange}
-            />
+        {/* Comparison Floating Bar */}
+        {selectedCorridors.length > 0 && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10 duration-500">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-4 flex items-center gap-6 backdrop-blur-md bg-slate-900/90">
+              <div className="flex items-center gap-2 px-2">
+                <BarChart3 className="w-5 h-5 text-blue-400" />
+                <span className="text-white font-bold">{selectedCorridors.length} selected</span>
+              </div>
+
+              <div className="flex gap-2">
+                {selectedCorridors.map(id => (
+                  <div key={id} className="bg-slate-800 text-slate-300 px-3 py-1 rounded-lg text-xs font-medium border border-slate-700 flex items-center gap-2">
+                    {id}
+                    <button onClick={(e) => toggleCorridor(id, e)} className="hover:text-red-400 transition-colors">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="h-8 w-px bg-slate-700 mx-2" />
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedCorridors([])}
+                  className="text-slate-400 hover:text-white text-sm font-medium transition-colors"
+                >
+                  Clear
+                </button>
+                <Link
+                  href={`/corridors/compare?ids=${selectedCorridors.join(",")}`}
+                  className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+                >
+                  Compare Now
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
           </div>
         )}
 
@@ -425,11 +417,10 @@ export default function CorridorsPage() {
           <p>
             Showing {filteredCorridors.length} of {corridors.length} corridors
           </p>
-          <p className="mt-2 text-xs">
-          {viewMode === "grid"
-              ? "Click any card to view detailed analytics"
-              : "Hover over heatmap cells to see detailed corridor metrics"}
-          </p>
+          <div className="mt-2 flex flex-col gap-1 text-xs">
+            <p>• Click any card to view detailed analytics</p>
+            <p>• Select up to 3 corridors to compare performance metrics side-by-side</p>
+          </div>
         </div>
       </div>
     </MainLayout>
