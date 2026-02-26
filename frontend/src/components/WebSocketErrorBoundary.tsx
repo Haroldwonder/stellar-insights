@@ -1,92 +1,74 @@
 "use client"
 
-import React, { Component, ErrorInfo, ReactNode } from "react"
-import { WifiOff, RefreshCw } from "lucide-react"
+import React, { useState, ReactNode } from "react"
+import { ErrorBoundary } from "./ErrorBoundary"
+import { WifiOff, RefreshCw, X } from "lucide-react"
 
 interface Props {
   children: ReactNode
-  fallback?: ReactNode
-  onError?: (error: Error, errorInfo: ErrorInfo) => void
-  componentName?: string
-}
-
-interface State {
-  hasError: boolean
-  error: Error | null
+  onError?: (error: Error) => void
 }
 
 /**
- * WebSocketErrorBoundary - Component-level error boundary for WebSocket and real-time components
- * Prevents WebSocket connection errors from crashing the entire application
+ * Error boundary wrapper for WebSocket-driven components
+ * Provides non-blocking fallback UI that can be dismissed
  */
-export class WebSocketErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props)
-    this.state = {
-      hasError: false,
-      error: null,
-    }
+export function WebSocketErrorBoundary({ children, onError }: Props) {
+  const [isDismissed, setIsDismissed] = useState(false)
+  const [errorKey, setErrorKey] = useState(0)
+
+  const handleReset = () => {
+    setIsDismissed(false)
+    setErrorKey((prev) => prev + 1)
   }
 
-  static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error }
+  const handleDismiss = () => {
+    setIsDismissed(true)
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Log errors only in development
-    if (process.env.NODE_ENV === "development") {
-      console.error(
-        `WebSocketErrorBoundary caught an error in ${this.props.componentName || "component"}:`,
-        error,
-        errorInfo
-      )
-    }
-
-    // Call optional error handler
-    this.props.onError?.(error, errorInfo)
-  }
-
-  handleRetry = () => {
-    this.setState({ hasError: false, error: null })
-  }
-
-  render() {
-    if (this.state.hasError) {
-      // Use custom fallback if provided
-      if (this.props.fallback) {
-        return this.props.fallback
-      }
-
-      // Default fallback UI
-      return (
-        <div className="flex flex-col items-center justify-center p-6 bg-gray-50 dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 min-h-[150px]">
-          <WifiOff className="w-8 h-8 text-amber-500 mb-3" />
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
-            Connection Error
-          </h3>
-          <p className="text-xs text-gray-600 dark:text-gray-400 text-center mb-4">
-            {this.props.componentName
-              ? `Unable to establish connection for ${this.props.componentName}`
-              : "Unable to establish real-time connection"}
+  const fallback = isDismissed ? null : (
+    <div className="relative p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+      <button
+        onClick={handleDismiss}
+        className="absolute top-2 right-2 p-1 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-800/50 rounded transition-colors"
+        aria-label="Dismiss error"
+      >
+        <X className="w-4 h-4" />
+      </button>
+      
+      <div className="flex items-start gap-3 pr-8">
+        <WifiOff className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-1">
+            Connection Issue
+          </h4>
+          <p className="text-sm text-amber-800 dark:text-amber-200 mb-3">
+            Unable to establish real-time connection. Data may not update automatically.
           </p>
-          
-          {process.env.NODE_ENV === "development" && this.state.error && (
-            <p className="text-xs text-rose-600 dark:text-rose-400 font-mono mb-4 max-w-full overflow-auto">
-              {this.state.error.message}
-            </p>
-          )}
-
           <button
-            onClick={this.handleRetry}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
+            onClick={handleReset}
+            className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors text-sm font-medium"
           >
-            <RefreshCw className="w-3 h-3" />
-            Reconnect
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry Connection
           </button>
         </div>
-      )
-    }
+      </div>
+    </div>
+  )
 
-    return this.props.children
-  }
+  return (
+    <ErrorBoundary
+      key={errorKey}
+      fallback={fallback}
+      onError={(error, errorInfo) => {
+        if (process.env.NODE_ENV === 'development') {
+          console.error("WebSocket component error:", error, errorInfo)
+        }
+        onError?.(error)
+      }}
+    >
+      {children}
+    </ErrorBoundary>
+  )
 }

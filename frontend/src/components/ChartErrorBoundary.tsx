@@ -7,7 +7,6 @@ interface Props {
   children: ReactNode
   fallback?: ReactNode
   onError?: (error: Error, errorInfo: ErrorInfo) => void
-  chartName?: string
 }
 
 interface State {
@@ -16,8 +15,8 @@ interface State {
 }
 
 /**
- * ChartErrorBoundary - Component-level error boundary for chart components
- * Prevents chart rendering errors from crashing the entire application
+ * Error boundary specifically for chart components
+ * Provides a retry mechanism and non-blocking fallback UI
  */
 export class ChartErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
@@ -33,16 +32,12 @@ export class ChartErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Log errors only in development
-    if (process.env.NODE_ENV === "development") {
-      console.error(
-        `ChartErrorBoundary caught an error in ${this.props.chartName || "chart"}:`,
-        error,
-        errorInfo
-      )
+    // Only log in development
+    if (process.env.NODE_ENV === 'development') {
+      console.error("ChartErrorBoundary caught an error:", error, errorInfo)
     }
-
-    // Call optional error handler
+    
+    // Call optional error callback
     this.props.onError?.(error, errorInfo)
   }
 
@@ -52,35 +47,33 @@ export class ChartErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      // Use custom fallback if provided
       if (this.props.fallback) {
         return this.props.fallback
       }
 
-      // Default fallback UI
       return (
-        <div className="flex flex-col items-center justify-center p-6 bg-gray-50 dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 min-h-[200px]">
-          <AlertTriangle className="w-8 h-8 text-amber-500 mb-3" />
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
+        <div className="flex flex-col items-center justify-center p-8 bg-gray-50 dark:bg-slate-900 rounded-lg border border-gray-200 dark:border-slate-700 min-h-[300px]">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
             Chart Error
           </h3>
-          <p className="text-xs text-gray-600 dark:text-gray-400 text-center mb-4">
-            {this.props.chartName
-              ? `Unable to render ${this.props.chartName}`
-              : "Unable to render chart"}
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 text-center max-w-md">
+            Unable to render this chart. This might be due to invalid data or a temporary issue.
           </p>
           
-          {process.env.NODE_ENV === "development" && this.state.error && (
-            <p className="text-xs text-rose-600 dark:text-rose-400 font-mono mb-4 max-w-full overflow-auto">
-              {this.state.error.message}
-            </p>
+          {process.env.NODE_ENV === 'development' && this.state.error && (
+            <div className="mb-4 p-3 bg-gray-100 dark:bg-slate-800 rounded border border-gray-300 dark:border-slate-600 max-w-md">
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-mono break-all">
+                {this.state.error.toString()}
+              </p>
+            </div>
           )}
-
+          
           <button
             onClick={this.handleRetry}
-            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
           >
-            <RefreshCw className="w-3 h-3" />
+            <RefreshCw className="w-4 h-4" />
             Retry
           </button>
         </div>

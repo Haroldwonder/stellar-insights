@@ -44,7 +44,7 @@ export const LiquidityChart: React.FC<LiquidityChartProps> = ({ data }) => {
                         />
                         <Tooltip
                             contentStyle={{ borderRadius: '8px', border: '1px solid #E5E7EB', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)' }}
-                            formatter={(value: number) => [`$${(value / 1000000).toFixed(1)}M`, "Liquidity"]}
+                            formatter={(value: number | undefined) => value !== undefined ? [`$${(value / 1000000).toFixed(1)}M`, "Liquidity"] : ['N/A', "Liquidity"]}
                         />
                         <Area
                             type="monotone"

@@ -8,6 +8,13 @@ import {
   type WebSocketConfig,
 } from '@/lib/websocket';
 
+enum ConnectionState {
+  DISCONNECTED = 'DISCONNECTED',
+  CONNECTING = 'CONNECTING',
+  CONNECTED = 'CONNECTED',
+  RECONNECTING = 'RECONNECTING',
+}
+
 export interface UseWebSocketOptions extends WebSocketConfig {
   /**
    * Automatically connect on mount
@@ -92,9 +99,17 @@ export function useWebSocket(
   const [isConnected, setIsConnected] = useState(false);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [lastMessage, setLastMessage] = useState<WsMessage | null>(null);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(
+    ConnectionState.DISCONNECTED
+  );
 
   const wsRef = useRef(getWebSocketInstance(wsConfig));
   const unsubscribersRef = useRef<Array<() => void>>([]);
+  const isConnectingRef = useRef(false);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const shouldReconnectRef = useRef(true);
+  const maxReconnectAttempts = wsConfig.maxReconnectAttempts || 5;
 
   // Handle message callback
   const handleMessage = useCallback(
@@ -105,6 +120,9 @@ export function useWebSocket(
       if (message.type === 'connected') {
         setIsConnected(true);
         setConnectionId(message.connection_id);
+        setConnectionState(ConnectionState.CONNECTED);
+        isConnectingRef.current = false;
+        reconnectAttemptsRef.current = 0;
         onConnect?.();
       }
 
@@ -123,6 +141,19 @@ export function useWebSocket(
   const connect = useCallback(() => {
     const ws = wsRef.current;
 
+    // Prevent duplicate connections
+    if (isConnectingRef.current) {
+      return;
+    }
+
+    // Check if already connected
+    if (ws.isConnected()) {
+      return;
+    }
+
+    isConnectingRef.current = true;
+    setConnectionState(ConnectionState.CONNECTING);
+
     // Clear any existing subscriptions
     unsubscribersRef.current.forEach((unsub) => unsub());
     unsubscribersRef.current = [];
@@ -139,8 +170,21 @@ export function useWebSocket(
       unsubscribersRef.current.push(unsub);
     }
 
+    // Add error handler for connection failures
+    const errorUnsub = ws.on('error', () => {
+      isConnectingRef.current = false;
+      setConnectionState(ConnectionState.DISCONNECTED);
+    });
+    unsubscribersRef.current.push(errorUnsub);
+
     // Connect
-    ws.connect();
+    try {
+      ws.connect();
+    } catch (error) {
+      isConnectingRef.current = false;
+      setConnectionState(ConnectionState.DISCONNECTED);
+      console.error('Failed to connect:', error);
+    }
 
     // Check connection status periodically
     const checkInterval = setInterval(() => {
@@ -149,8 +193,27 @@ export function useWebSocket(
 
       if (connected) {
         setConnectionId(ws.getConnectionId());
+        if (connectionState !== ConnectionState.CONNECTED) {
+          setConnectionState(ConnectionState.CONNECTED);
+          isConnectingRef.current = false;
+        }
       } else {
         setConnectionId(null);
+        if (
+          connectionState === ConnectionState.CONNECTED ||
+          connectionState === ConnectionState.CONNECTING
+        ) {
+          // Connection lost, attempt reconnect
+          if (
+            shouldReconnectRef.current &&
+            reconnectAttemptsRef.current < maxReconnectAttempts
+          ) {
+            scheduleReconnect();
+          } else {
+            setConnectionState(ConnectionState.DISCONNECTED);
+            isConnectingRef.current = false;
+          }
+        }
       }
     }, 1000);
 
@@ -158,11 +221,53 @@ export function useWebSocket(
     unsubscribersRef.current.push(() => {
       clearInterval(checkInterval);
     });
-  }, [messageTypes, handleMessage]);
+  }, [messageTypes, handleMessage, connectionState, maxReconnectAttempts]);
+
+  // Schedule reconnection with exponential backoff and jitter
+  const scheduleReconnect = useCallback(() => {
+    // Clear existing reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Check if we should reconnect
+    if (
+      !shouldReconnectRef.current ||
+      reconnectAttemptsRef.current >= maxReconnectAttempts
+    ) {
+      setConnectionState(ConnectionState.DISCONNECTED);
+      isConnectingRef.current = false;
+      return;
+    }
+
+    reconnectAttemptsRef.current++;
+    setConnectionState(ConnectionState.RECONNECTING);
+
+    // Exponential backoff with jitter
+    const baseDelay = 1000;
+    const exponentialDelay = baseDelay * Math.pow(2, reconnectAttemptsRef.current - 1);
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(exponentialDelay + jitter, 30000); // Max 30s
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      isConnectingRef.current = false;
+      connect();
+    }, delay);
+  }, [connect, maxReconnectAttempts]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
     const ws = wsRef.current;
+
+    shouldReconnectRef.current = false;
+    isConnectingRef.current = false;
+
+    // Clear reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
 
     // Unsubscribe from all events
     unsubscribersRef.current.forEach((unsub) => unsub());
@@ -173,9 +278,26 @@ export function useWebSocket(
 
     setIsConnected(false);
     setConnectionId(null);
+    setConnectionState(ConnectionState.DISCONNECTED);
+    reconnectAttemptsRef.current = 0;
 
     onDisconnect?.();
   }, [onDisconnect]);
+
+  // Manual reconnect function
+  const reconnect = useCallback(() => {
+    // Disconnect first
+    disconnect();
+
+    // Reset attempts and enable reconnect
+    reconnectAttemptsRef.current = 0;
+    shouldReconnectRef.current = true;
+
+    // Delay slightly before reconnecting
+    setTimeout(() => {
+      connect();
+    }, 100);
+  }, [disconnect, connect]);
 
   // Send ping
   const ping = useCallback(() => {
@@ -185,11 +307,13 @@ export function useWebSocket(
   // Auto-connect on mount
   useEffect(() => {
     if (autoConnect) {
+      shouldReconnectRef.current = true;
       connect();
     }
 
     // Cleanup on unmount
     return () => {
+      shouldReconnectRef.current = false;
       disconnect();
     };
   }, [autoConnect, connect, disconnect]);
@@ -198,7 +322,7 @@ export function useWebSocket(
     isConnected,
     connectionId,
     lastMessage,
-    connect,
+    connect: reconnect, // Use reconnect for public API to ensure clean state
     disconnect,
     ping,
   };
